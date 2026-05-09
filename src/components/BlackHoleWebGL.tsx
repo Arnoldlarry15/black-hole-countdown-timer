@@ -90,113 +90,118 @@ const fsSource = `
           return;
       }
       
-      // Decrease starting distance to make BH look massive initially, linearly falling
-      float dist = mix(4.0, 0.005, u_progress); // Scale linearly as time moves on
-      float eh = 0.2 / max(dist, 0.0001); // Event horizon apparent size 
-
-      // Gravitational Lensing (Einstein field equations approximation)
-      vec2 lensedUV = uv;
-      if (r > eh) {
-          float warp = (eh * eh) / (r * r);
-          lensedUV = uv * (1.0 + warp * 2.5); 
-      }
-
-      // Background Stars
-      float s = rand(lensedUV * 300.0);
+      // --- RELATIVISTIC BLACK HOLE (Geodesic Raymarching) ---
+      
+      // Scale visual size linearly
+      float dist = mix(18.0, 1.0, u_progress);
+      
+      // Camera slightly above equatorial plane to see the full lensed disk
+      vec3 ro = vec3(0.0, dist * 0.15, -dist); 
+      vec3 ta = vec3(0.0, 0.0, 0.0);
+      
+      vec3 fwd = normalize(ta - ro);
+      vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), fwd));
+      vec3 up = cross(fwd, right);
+      
+      float fov = mix(1.0, 2.5, u_progress); // Stretch FOV at the end for vertigo
+      vec3 rd = normalize(fwd + uv.x * right * fov + uv.y * up * fov);
+      
+      vec3 p = ro;
+      vec3 v = rd;
+      
+      float Rs = 1.0;
+      float r_in = Rs * 1.5; // Photon sphere / ISCO area
+      float r_out = Rs * 8.0;
+      
       vec3 col = vec3(0.0);
-      if (s > 0.992) {
-          col += vec3(pow(s, 50.0) * 15.0);
-          col *= mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.7, 0.5), rand(lensedUV * 10.0));
-      }
-
-      // Spatial Distortion Glow
-      if (r > eh) {
-          float backgroundDistortion = smoothstep(eh * 5.0, eh, r);
-          col += vec3(0.01, 0.03, 0.08) * backgroundDistortion * fbm(lensedUV * 15.0);
-      }
-
-      // Primary Accretion Disk (Tilted)
-      vec2 diskUV = lensedUV;
-      // As we get closer (dist gets smaller), the disk tilt changes simulating changing viewing plane
-      diskUV.y *= mix(8.0, 2.0, u_progress); 
-      float dr = length(diskUV);
-      float da = atan(diskUV.y, diskUV.x);
-
-      vec3 diskCol = vec3(0.0);
-      if (dr > eh * 1.05 && dr < eh * 15.0) {
-          float spin = u_time * 2.5 / max(dr, 0.1);
-          float d = fbm(vec2(dr * 12.0, da * 5.0) - spin);
-
-          // Doppler beaming
-          float doppler = 1.0 - (uv.x / max(r, 0.0001)) * 0.9;
-          vec3 baseColor = mix(vec3(1.0, 0.1, 0.0), vec3(1.0, 0.9, 0.5), clamp(doppler, 0.0, 1.0));
-
-          if (u_pnr > 0.0) {
-              baseColor = mix(baseColor, vec3(0.2, 0.0, 1.0), u_pnr * 0.9);
-              d += fbm(diskUV * 15.0 + u_time * 8.0) * u_pnr * 0.6;
-          }
-
-          float fade = smoothstep(eh * 1.05, eh * 2.5, dr) * exp(-(dr - eh * 1.3) * 0.4);
-          diskCol = baseColor * d * fade * max(doppler, 0.1) * 8.0;
-      }
-
-      // Lensed Top/Bottom Halo
-      vec3 haloCol = vec3(0.0);
-      if (r > eh && r < eh * 4.0) {
-          float poleBlend = pow(abs(uv.y) / max(r, 0.0001), 2.5); 
-          float arcR = abs(r - eh * 1.15);
-          float arcFade = exp(-arcR * 5.0 / eh);
+      float alpha = 0.0;
+      bool hitBH = false;
+      
+      // Raymarching Geodesics
+      for (int i = 0; i < 180; i++) {
+          float ray_r = length(p);
           
-          float doppler = 1.0 - (uv.x / max(r, 0.0001)) * 0.6;
-          vec3 arcColor = mix(vec3(1.0, 0.2, 0.0), vec3(1.0, 0.8, 0.4), clamp(doppler, 0.0, 1.0));
-          float arcNoise = fbm(vec2(atan(uv.y, uv.x) * 5.0 - u_time, r * 12.0));
-
-          haloCol = arcColor * arcFade * poleBlend * arcNoise * max(doppler, 0.2) * 6.0;
+          if (ray_r < Rs) {
+              hitBH = true;
+              break;
+          }
+          if (ray_r > 25.0) {
+              break;
+          }
           
-          if (u_pnr > 0.0) {
-              haloCol = mix(haloCol, vec3(0.3, 0.1, 1.0) * arcFade * poleBlend * 4.0, u_pnr * 0.8);
+          vec3 h = cross(p, v);
+          float h2 = dot(h, h);
+          vec3 a = -1.5 * Rs * h2 * p / pow(ray_r, 5.0);
+          
+          float step_dt = max(0.04 * ray_r, 0.01);
+          
+          vec3 p_next = p + v * step_dt;
+          vec3 v_next = v + a * step_dt;
+          
+          // Accretion disk intersection (y = 0 plane)
+          if (sign(p.y) != sign(p_next.y)) {
+              float f = -p.y / (p_next.y - p.y + 1e-6);
+              vec3 hit_p = mix(p, p_next, f);
+              float hit_r = length(hit_p);
+              
+              if (hit_r > r_in && hit_r < r_out) {
+                  float vel = sqrt(Rs / (2.0 * hit_r));
+                  vec3 disk_v = normalize(vec3(-hit_p.z, 0.0, hit_p.x)) * vel;
+                  
+                  vec3 photon_dir = -normalize(v); 
+                  float dot_v = dot(photon_dir, disk_v);
+                  float gamma = 1.0 / sqrt(1.0 - vel*vel);
+                  float doppler = 1.0 / (gamma * (1.0 - dot_v));
+                  
+                  float density = smoothstep(r_in, r_in + 0.5, hit_r) * smoothstep(r_out, r_out - 4.0, hit_r);
+                  float angle = atan(hit_p.z, hit_p.x);
+                  float noise_val = fbm(vec2(hit_r * 4.0, angle * 3.0 - u_time * 1.5));
+                  
+                  // Doppler shifts color and intensity drastically
+                  vec3 baseColor = mix(vec3(1.0, 0.1, 0.0), vec3(0.6, 0.8, 1.0), clamp(doppler - 0.8, 0.0, 1.0));
+                  float intensity = pow(doppler, 3.0) * density * noise_val * (3.0 / hit_r);
+                  
+                  if (u_pnr > 0.0) {
+                      baseColor = mix(baseColor, vec3(0.3, 0.0, 1.0), u_pnr);
+                      intensity += u_pnr * 0.5;
+                  }
+                  
+                  vec3 emit = baseColor * intensity * 4.0;
+                  float alpha_layer = clamp(density * noise_val * 2.5, 0.0, 1.0);
+                  
+                  col += emit * (1.0 - alpha);
+                  alpha += alpha_layer * (1.0 - alpha);
+                  
+                  if (alpha > 0.98) break;
+              }
           }
+          
+          p = p_next;
+          v = v_next;
       }
-
-      // Add Back Disk and Halo
-      float isFrontDisk = step(uv.y, 0.0); // 1.0 if y < 0 (front of the tilted disk is below the center)
-      col += diskCol * (1.0 - isFrontDisk); 
-      col += haloCol;
-
-      // Photon Sphere Outline
-      float photonDist = abs(r - eh * 1.02);
-      float photonRing = exp(-photonDist * 50.0 / eh);
-      col += vec3(1.0, 0.9, 0.5) * photonRing * 3.5;
-
-      // Inner event horizon subtle gradient falloff
-      float ehGlow = exp(-(r - eh) * 15.0 / eh);
-      col += vec3(0.8, 0.3, 0.0) * ehGlow * clamp(1.0 - u_pnr, 0.0, 1.0);
-
-      if (u_pnr > 0.0) {
-          float pnrGlow = exp(-(r - eh) * 12.0 / eh) * u_pnr;
-          col += vec3(0.6, 0.0, 1.0) * pnrGlow * 3.0 * fbm(uv * 20.0 - u_time * 5.0);
-      }
-
-      // Pure Black Singular Mask
-      if (r < eh) {
-          col = vec3(0.0);
-      }
-
-      // Add Front Disk over the shadow
-      col += diskCol * isFrontDisk; // Add the front half on top of the black shadow
-
-      // Post-PNR eerie glitch inside
-      if (r < eh * 0.98 && u_pnr > 0.0) {
-          float voidGlitch = fbm(uv * 30.0 + u_time * 10.0);
-          if (voidGlitch > 0.9) {
-              col += vec3(0.1, 0.0, 0.2) * u_pnr * (voidGlitch - 0.9) * 5.0;
+      
+      // Starfield Background
+      if (!hitBH && alpha < 0.98) {
+          vec3 ray_dir = normalize(v);
+          float s = rand(ray_dir.xy * 200.0 + ray_dir.z); 
+          vec3 bg = vec3(0.0);
+          if (s > 0.99) {
+              bg = mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.8, 0.5), rand(ray_dir.yz * 50.0)) * pow(s, 60.0) * 15.0;
           }
+          
+          col += bg * (1.0 - alpha);
       }
-
+      
+      // Horizon flash
       if (u_progress > 0.96) {
           float flash = pow((u_progress - 0.96) * 25.0, 2.0);
           col += vec3(flash);
       }
+      
+      // Post processing
+      col = col / (1.0 + col); // Reinhard tonemapping
+      col = pow(col, vec3(1.0/2.2)); // Gamma
+      col *= 1.0 - 0.4 * dot(uv, uv); // Vignette
 
       gl_FragColor = vec4(col, 1.0);
   }
