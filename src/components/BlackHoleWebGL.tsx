@@ -66,22 +66,6 @@ const fsSource = `
           bgCol += vec3(0.1, 0.6, 0.9) * pow(neb2, 2.0) * 1.5;
           bgCol += vec3(0.9, 0.4, 0.2) * pow(neb3, 3.0) * 1.0;
           
-          // Stars
-          float s = rand(floatUV * 150.0);
-          if (s > 0.98) {
-              bgCol += vec3(pow(s, 20.0) * 5.0);
-              float twinkle = sin(u_time * 3.0 + s * 100.0) * 0.5 + 0.5;
-              bgCol += vec3(0.6, 0.8, 1.0) * twinkle * pow(s, 40.0) * 8.0;
-          }
-          
-          // Galaxies / Supernovae
-          float sn = rand(floatUV * 30.0);
-          if (sn > 0.995) {
-              float snPulse = sin(u_time * 1.0 + sn * 50.0) * 0.5 + 0.5;
-              float flare = 0.01 / max(length(fract(floatUV * 30.0) - 0.5), 0.001);
-              bgCol += vec3(1.0, 0.8, 0.4) * snPulse * flare * 2.0;
-          }
-
           // Initial white flash fading out
           float flash = exp(-postProgress * 5.0);
           bgCol = mix(bgCol, vec3(1.0), flash);
@@ -93,7 +77,7 @@ const fsSource = `
       // --- RELATIVISTIC BLACK HOLE (Geodesic Raymarching) ---
       
       // Scale visual size linearly
-      float dist = mix(18.0, 1.0, u_progress);
+      float dist = mix(18.0, 0.98, u_progress);
       
       // Camera slightly above equatorial plane to see the full lensed disk
       vec3 ro = vec3(0.0, dist * 0.15, -dist); 
@@ -155,7 +139,7 @@ const fsSource = `
                   
                   float density = smoothstep(r_in, r_in + 0.5, hit_r) * smoothstep(r_out, r_out - 4.0, hit_r);
                   float angle = atan(hit_p.z, hit_p.x);
-                  float noise_val = fbm(vec2(hit_r * 4.0, angle * 3.0 - u_time * 1.5));
+                  float noise_val = smoothstep(0.0, 1.0, fbm(vec2(hit_r * 2.0, angle * 2.0 - u_time * 1.0)));
                   
                   // Doppler shifts color and intensity drastically
                   vec3 baseColor = mix(vec3(1.0, 0.1, 0.0), vec3(0.6, 0.8, 1.0), clamp(doppler - 0.8, 0.0, 1.0));
@@ -182,13 +166,7 @@ const fsSource = `
       
       // Starfield Background
       if (!hitBH && alpha < 0.98) {
-          vec3 ray_dir = normalize(v);
-          float s = rand(ray_dir.xy * 200.0 + ray_dir.z); 
-          vec3 bg = vec3(0.0);
-          if (s > 0.99) {
-              bg = mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.8, 0.5), rand(ray_dir.yz * 50.0)) * pow(s, 60.0) * 15.0;
-          }
-          
+          vec3 bg = vec3(0.0); // No stars to prevent static noise aliasing
           col += bg * (1.0 - alpha);
       }
       

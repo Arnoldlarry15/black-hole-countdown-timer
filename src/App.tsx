@@ -81,8 +81,8 @@ export default function App() {
         engineRef.current?.update(progress);
 
         // Calculate Countdown Number to perfectly align with hitting the event horizon
-        const timeLeftMs = durationMs - elapsed;
-        const currentSecond = Math.ceil(timeLeftMs / 1000);
+        const timeLeftMs = Math.max(durationMs - elapsed, 0);
+        const currentSecond = Math.floor(timeLeftMs / 1000);
         const isCountdownActive = currentSecond <= 10 && currentSecond >= 0;
         
         // Trigger tick audio and state update once per second
