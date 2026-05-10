@@ -41,6 +41,12 @@ const fsSource = `
       return f;
   }
 
+  float hash31(vec3 p3) {
+      p3  = fract(p3 * 0.1031);
+      p3 += dot(p3, p3.zyx + 31.32);
+      return fract((p3.x + p3.y) * p3.z);
+  }
+
   void main() {
       vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.y, u_resolution.x);
       float r = length(uv);
@@ -166,7 +172,42 @@ const fsSource = `
       
       // Starfield Background
       if (!hitBH && alpha < 0.98) {
-          vec3 bg = vec3(0.0); // No stars to prevent static noise aliasing
+          vec3 ray_dir = normalize(v);
+          vec3 bg = vec3(0.0);
+          
+          // Soft Ethereal Nebula
+          vec2 skyUV = ray_dir.xy * 2.5;
+          float neb1 = fbm(skyUV + vec2(ray_dir.z));
+          float neb2 = fbm(skyUV * 1.5 - vec2(ray_dir.z) + vec2(2.0, 3.0));
+          
+          bg += vec3(0.02, 0.05, 0.12) * pow(neb1, 2.0);
+          bg += vec3(0.1, 0.02, 0.05) * pow(neb2, 3.0);
+          
+          // Beautiful Parallax Starfield (Cellular noise approach)
+          for (float i = 1.0; i <= 3.0; i++) {
+              vec3 p = ray_dir * (80.0 * i);
+              vec3 id = floor(p);
+              vec3 local = fract(p) - 0.5;
+              
+              float h = hash31(id);
+              if (h > 0.95 + i * 0.01) {
+                  float size = fract(h * 435.32);
+                  
+                  // Move star position randomly within the cell
+                  vec3 starOffset = vec3(
+                      fract(h * 153.21) - 0.5,
+                      fract(h * 841.12) - 0.5,
+                      fract(h * 231.44) - 0.5
+                  ) * 0.5;
+                  
+                  float dist = length(local - starOffset);
+                  float glow = smoothstep(0.1 * size + 0.08, 0.0, dist) * (1.5 + size);
+                  glow *= sin(u_time * 2.0 + h * 50.0) * 0.5 + 0.5; // twinkle
+                  vec3 starColor = mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.8, 0.5), fract(h * 921.32));
+                  bg += glow * starColor * (4.0 / i);
+              }
+          }
+          
           col += bg * (1.0 - alpha);
       }
       
